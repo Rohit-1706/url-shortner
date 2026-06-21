@@ -9,8 +9,10 @@ from app.models import URL
 from app.schemas import ShortenRequest, ShortenResponse, StatsResponse
 from app.cache import get_cached_url, set_cached_url, increment_clicks, get_clicks_count
 from app.shortner import generate_code
+from app.cache import cache 
 
 import os
+from datetime import datetime, timezone, timedelta
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,13 +45,19 @@ async def shorten_url(request: ShortenRequest, db: AsyncSession = Depends(get_db
         else:
             raise HTTPException(500, "Could not generate unique code")
 
+    expires_at = None
+    if request.expires_in:
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=request.expires_in)
     
-    url_obj = URL(code=code, original=url_str)
+    url_obj = URL(code=code, original=url_str, expires_at=expires_at)
     db.add(url_obj)
     await db.commit()
     await db.refresh(url_obj)
 
-    await set_cached_url(code, url_str)
+    if request.expires_in:
+        await cache.setex(f"url:{code}", request.expires_in, url_str)
+    else:
+        await set_cached_url(code, url_str)
 
     return ShortenResponse(
         code=code,
@@ -84,6 +92,8 @@ async def redirect(code: str, db: AsyncSession = Depends(get_db)):
         url_obj = result.scalar_one_or_none()
         if not url_obj:
             raise HTTPException(status_code=404, detail="URL not found")
+        if url_obj.expires_at and url_obj.expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=410, detail="URL has expired")
         original = url_obj.original
         await set_cached_url(code, original)
 
