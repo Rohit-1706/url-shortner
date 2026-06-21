@@ -27,13 +27,21 @@ BASE_URL = os.getenv("BASE_URL")
 async def shorten_url(request: ShortenRequest, db: AsyncSession = Depends(get_db)):
     url_str = str(request.url)
 
-    for _ in range(5):
-        code = generate_code()
-        result = await db.execute(select(URL).where(URL.code == code))
-        if not result.scalar_one_or_none():
-            break
+    if request.custom_code:
+        # Check if it already exists
+        result = await db.execute(select(URL).where(URL.code == request.custom_code))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Code already taken")
+        code = request.custom_code
+    
     else:
-        raise HTTPException(500, "Could not generate unique code")
+        for _ in range(5):
+            code = generate_code()
+            result = await db.execute(select(URL).where(URL.code == code))
+            if not result.scalar_one_or_none():
+                break
+        else:
+            raise HTTPException(500, "Could not generate unique code")
 
     
     url_obj = URL(code=code, original=url_str)

@@ -6,6 +6,7 @@ from datetime import datetime
 
 class ShortenRequest(BaseModel):
     url: HttpUrl
+    custom_code: str | None = None
 
 class ShortenResponse(BaseModel):
     code: str
